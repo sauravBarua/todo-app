@@ -62,8 +62,10 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
 
-      - name: Copy compose file
-        run: scp -i ~/.ssh/deploy_key docker-compose.prod.yml "$VPS_USER@$VPS_HOST:todo-app/docker-compose.yml"
+      - name: Copy compose file and Caddyfile
+        run: |
+          scp -i ~/.ssh/deploy_key docker-compose.prod.yml "$VPS_USER@$VPS_HOST:todo-app/docker-compose.yml"
+          scp -i ~/.ssh/deploy_key Caddyfile "$VPS_USER@$VPS_HOST:todo-app/Caddyfile"
 
       - name: Pull images and restart
         env:
@@ -74,4 +76,4 @@ jobs:
           ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "cd todo-app && docker compose pull && docker compose up -d --remove-orphans && docker image prune -f && docker logout ghcr.io"
 
       - name: Smoke test
-        run: curl -fsS --retry 10 --retry-delay 3 --retry-connrefused "http://$VPS_HOST:3000/" > /dev/null
+        run: curl -fsS --retry 10 --retry-delay 3 --retry-connrefused "https://todo.yourdomain.com/" > /dev/null
