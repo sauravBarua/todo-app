@@ -1,0 +1,77 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api, web]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Lowercase the owner name
+        run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER }}/todo-${{ matrix.service }}:latest
+            ghcr.io/${{ env.OWNER }}/todo-${{ matrix.service }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Copy compose file
+        run: scp -i ~/.ssh/deploy_key docker-compose.prod.yml "$VPS_USER@$VPS_HOST:todo-app/docker-compose.yml"
+
+      - name: Pull images and restart
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          echo "$GHCR_TOKEN" | ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "docker login ghcr.io -u $GHCR_USER --password-stdin"
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "cd todo-app && docker compose pull && docker compose up -d --remove-orphans && docker image prune -f && docker logout ghcr.io"
+
+      - name: Smoke test
+        run: curl -fsS --retry 10 --retry-delay 3 --retry-connrefused "http://$VPS_HOST:3000/" > /dev/null
