@@ -76,4 +76,4 @@ jobs:
           ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" "cd todo-app && docker compose pull && docker compose up -d --remove-orphans && docker image prune -f && docker logout ghcr.io"
 
       - name: Smoke test
-        run: curl -fsS --retry 10 --retry-delay 3 --retry-connrefused "https://57-129-125-131.sslip.io/" > /dev/null
+        run: curl -fsS --retry 10 --retry-delay 3 --retry-connrefused "https://todo.devportfolio.duckdns.org/" > /dev/null
